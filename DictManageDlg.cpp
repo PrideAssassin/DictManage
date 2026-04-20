@@ -10,45 +10,67 @@
 #include<string>
 #include<time.h>
 #include<algorithm>
+#include<thread>
+#include <atlconv.h>
+#include <locale>
+#include <codecvt>
+#include <mutex>
+#include <condition_variable>
+#include <filesystem>
+#include <windows.h>
 
+std::mutex dict_mutex;
+std::condition_variable dict_cv;
+bool dict_ready = false;
 
 
 using namespace std;
-auto dict_count1 = 0;		// 用来保存字典1大小
-auto dict_count2 = 0;		// 用来保存字典2大小
-auto dict_new = 0;			// 用来保存新字典大小
-
-vector<string> zidian1, zidian2;		//创建string对象，存放字典文件
+size_t dict_count1 = 0;		// 用来保存字典1大小
+size_t dict_count2 = 0;		// 用来保存字典2大小
+size_t dict_new = 0;			// 用来保存新字典大小
+vector<wstring> zidian1, zidian2;		//创建string对象，存放字典文件
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
 #endif
-#include <string>
 
 
-// 用于应用程序“关于”菜单项的 CAboutDlg 对话框
+// 自定义消息定义
+#define WM_FILE_LOAD_FINISHED (WM_USER + 100)
+#define WM_UPDATE_COUNT_NEW (WM_USER + 101)
 
-class CAboutDlg : public CDialogEx
-{
-public:
-	CAboutDlg();
+// -----------------自定义功能函数-----------------------------
+// 计数处理
+static void calc(CDictManageDlg* pDlg, UINT nID, CMFCEditBrowseCtrl* pCtrl) {
+	if (pDlg != nullptr && pCtrl != nullptr)
+	{
+		int button_i = (nID == IDC_FILE1) ? 1 : (nID == IDC_FILE2 ? 2 : 0);
+		if (button_i == 0) return;
 
-	// 对话框数据
-#ifdef AFX_DESIGN_TIME
-	enum { IDD = IDD_ABOUTBOX };
-#endif
+		CString path;
+		pCtrl->GetWindowTextW(path);
 
-protected:
-	virtual void DoDataExchange(CDataExchange* pDX);    // DDX/DDV 支持
-
-	// 实现
-protected:
-	DECLARE_MESSAGE_MAP()
-};
-
-CAboutDlg::CAboutDlg() : CDialogEx(IDD_ABOUTBOX)
-{
+		// 捕获 button_i 和 path
+		thread([pDlg, button_i, path]() {
+			vector<wstring> data;
+			wifstream fs(path.GetString());
+			fs.imbue(locale(""));
+			wstring wbuf;
+			while (fs >> wbuf) {
+				data.push_back(wbuf);
+			}
+			fs.close();
+			auto* result = new FileLoadResult{ button_i, move(data) };
+			::PostMessage(pDlg->GetSafeHwnd(), WM_FILE_LOAD_FINISHED, reinterpret_cast<WPARAM>(result), 0);
+			}).detach();
+	}
 }
+
+
+
+// -----------------------------关于CAboutDlg---------------------------------------------
+
+CAboutDlg::CAboutDlg() : CDialogEx(IDD_ABOUTBOX){}
 
 void CAboutDlg::DoDataExchange(CDataExchange* pDX)
 {
@@ -58,37 +80,39 @@ void CAboutDlg::DoDataExchange(CDataExchange* pDX)
 BEGIN_MESSAGE_MAP(CAboutDlg, CDialogEx)
 END_MESSAGE_MAP()
 
-
-
 CDictManageDlg::CDictManageDlg(CWnd* pParent /*=nullptr*/)
 	: CDialogEx(IDD_DICTMANAGE_DIALOG, pParent)
 {
 	m_hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME);
 }
 
+
+
+
+
+//-----------------------------------------------CDictManageDlg类-----------------------------------------------------------------
+
 void CDictManageDlg::DoDataExchange(CDataExchange* pDX)
 {
 	CDialogEx::DoDataExchange(pDX);
-	DDX_Control(pDX, IDC_FILE1, FILE1);
 	DDX_Control(pDX, IDC_COUNT1, count1);
-	DDX_Control(pDX, IDC_COUNT_NEW, count_new);
-	DDX_Control(pDX, IDC_FILE2, FILE2);
 	DDX_Control(pDX, IDC_COUNT2, count2);
+	DDX_Control(pDX, IDC_COUNT_NEW, count_new);
+	DDX_Control(pDX, IDC_FILE1, file1);
+	DDX_Control(pDX, IDC_FILE2, file2);
 }
 
 BEGIN_MESSAGE_MAP(CDictManageDlg, CDialogEx)
 	ON_WM_SYSCOMMAND()
 	ON_WM_PAINT()
 	ON_WM_QUERYDRAGICON()
-	ON_BN_CLICKED(IDC_CALCULATE1, &CDictManageDlg::OnBnClickedCalculate1)
 	ON_BN_CLICKED(IDC_DE_WEIGHT, &CDictManageDlg::OnBnClickedDeWeight)
-	ON_BN_CLICKED(IDC_CALCULATE2, &CDictManageDlg::OnBnClickedCalculate2)
 	ON_BN_CLICKED(IDC_MERGE, &CDictManageDlg::OnBnClickedMerge)
 	ON_BN_CLICKED(IDC_FILTER, &CDictManageDlg::OnBnClickedFilter)
+	ON_MESSAGE(WM_FILE_LOAD_FINISHED, &CDictManageDlg::OnFileLoadFinished)
+	ON_MESSAGE(WM_UPDATE_COUNT_NEW, &CDictManageDlg::OnUpdateCountNew)
 END_MESSAGE_MAP()
 
-
-// CDictManageDlg 消息处理程序
 
 BOOL CDictManageDlg::OnInitDialog()
 {
@@ -137,10 +161,6 @@ void CDictManageDlg::OnSysCommand(UINT nID, LPARAM lParam)
 	}
 }
 
-// 如果向对话框添加最小化按钮，则需要下面的代码
-//  来绘制该图标。  对于使用文档/视图模型的 MFC 应用程序，
-//  这将由框架自动完成。
-
 void CDictManageDlg::OnPaint()
 {
 	if (IsIconic())
@@ -166,165 +186,181 @@ void CDictManageDlg::OnPaint()
 	}
 }
 
-//当用户拖动最小化窗口时系统调用此函数取得光标
-//显示。
 HCURSOR CDictManageDlg::OnQueryDragIcon()
 {
 	return static_cast<HCURSOR>(m_hIcon);
 }
 
+LRESULT CDictManageDlg::OnFileLoadFinished(WPARAM wParam, LPARAM lParam)
+{
+	FileLoadResult* result = reinterpret_cast<FileLoadResult*>(wParam);
+    if (result)
+    {
+        // 更新对应的计数显示
+        if (result->button_i == 1)
+        {
+			zidian1 = move(result->data);
+			dict_count1 = static_cast<long>(zidian1.size());
+			CString str;
+			str.Format(_T("%zu"), static_cast<unsigned long long>(dict_count1));
+			count1.SetWindowTextW(str);
+        }
+        else if (result->button_i == 2)
+        {
+			zidian2 = move(result->data);
+			dict_count2 = static_cast<unsigned long long>(zidian2.size());
+			CString str;
+			str.Format(_T("%zu"), static_cast<unsigned long long>(dict_count2));
+			count2.SetWindowTextW(str);
+        }
+		delete result; // 释放内存
+    }
+    return 0;
+}
 
-
-// 计算按钮的核心代码
-void CDictManageDlg::CalcCore(int button_i)
+LRESULT CDictManageDlg::OnUpdateCountNew(WPARAM wParam, LPARAM lParam)
 {
 	CString str;
-	string buf;						//设置一个读取缓存区
-	char* name = 0;
-	size_t len = 0;
-
-	switch (button_i)
-	{
-	case 1:
-	{
-		zidian1 = {};
-		FILE1.GetWindowTextW(str);		//获取编辑框1内容
-		ifstream fs(str);		// 打开指定路径文件，并与当前流绑定(创建对象fs，并初始化)
-		// 从指定流读取数据到缓存区，存将缓冲区字符存入zidian模板
-		while (fs >> buf)
-		{
-			zidian1.push_back(buf);				//将读取的数据存到字典对象中,//1600W个元素，添加时间大概52秒。
-		}
-		fs.close();								//关闭字典文件流
-		dict_count1 = zidian1.size();					// 获取字典的大小
-		str.Format(_T("%d"), dict_count1);				// 将int转PTRSTR类型
-		LPCTSTR pStr = LPCTSTR(str);
-		count1.SetWindowTextW(pStr);		//设置字典1计数大小
-		break;
-	}
-	case 2:
-	{
-		zidian2 = {};
-		FILE2.GetWindowTextW(str);		//获取编辑框2内容
-		ifstream fs(str);		// 打开指定路径文件，并与当前流绑定(创建对象fs，并初始化)
-		// 从指定流读取数据到缓存区，存将缓冲区字符存入zidian模板
-		while (fs >> buf)
-		{
-			zidian2.push_back(buf);				//将读取的数据存到字典对象中,//1600W个元素，添加时间大概52秒。
-		}
-		fs.close();								//关闭字典文件流
-		dict_count2 = zidian2.size();					// 获取字典的大小
-		str.Format(_T("%d"), dict_count2);				// 将int转PTRSTR类型
-		LPCTSTR pStr = LPCTSTR(str);
-		count2.SetWindowTextW(pStr);		//设置字典1计数大小
-		break;
-	}
-	default:
-		break;
-	}
+	str.Format(_T("%zu"), static_cast<unsigned long long>(wParam));
+	count_new.SetWindowTextW(str);
+	return 0;
 }
 
-// 计算1按钮，被单击事件(计数字典大小)
-void CDictManageDlg::OnBnClickedCalculate1()
-{
-	CalcCore(1);
-}
 
-// 计算2按钮，被单击事件(计数字典大小)
-void CDictManageDlg::OnBnClickedCalculate2()
-{
-	CalcCore(2);
-}
 
-// 去重复按钮被单击
+
+// 去重复按钮
 void CDictManageDlg::OnBnClickedDeWeight()
 {
-	OnBnClickedCalculate1();
-	sort(zidian1.begin(), zidian1.end());						//排序函数
-	auto uend = unique(zidian1.begin(), zidian1.end());		//去重函数(不会改变容器大小)
-	zidian1.erase(uend, zidian1.end());						 // 删除掉容器重复多余部分
-	dict_new = zidian1.size();									// 去重后的大小
-	// 如果原文件大小与去重后大小没有变化(没有重复的元素)，就不执行任何操作,
-	if (dict_new < dict_count1)
-	{
-		ofstream zd("c:\\new.txt");
-		for (auto& i : zidian1)
+	thread([this]() {
+		sort(zidian1.begin(), zidian1.end());
+		auto uend = unique(zidian1.begin(), zidian1.end());		//去重函数(不会改变容器大小)
+		zidian1.erase(uend, zidian1.end());						 // 删除掉容器重复多余部分
+		
+		dict_new = zidian1.size();									// 去重后的大小
+	
+		// 如果原文件大小与去重后大小没有变化(没有重复的元素)，就不执行任何操作,
+		if (dict_new < dict_count1)
 		{
-			zd << i + "\n";
-		}
-		zd.close();
-	}
-	CString str;
-	str.Format(_T("%d"), dict_new);				// 将int转PTRSTR类型
-	LPCTSTR pStr = LPCTSTR(str);
-	count_new.SetWindowTextW(pStr);		//设置字典1计数大小
-}
-
-// 合并按钮被单击
-void CDictManageDlg::OnBnClickedMerge()
-{
-	OnBnClickedCalculate1();
-	OnBnClickedCalculate2();
-	dict_new = 0;
-	if (zidian1.empty() && zidian2.empty())
-	{
-		// 保证两个编辑框里面字典都不会空，才会进行合并字典。
-	}
-	else
-	{
-		if (zidian1.size() >= zidian2.size())
-		{
-			zidian1.insert(zidian1.end(), zidian2.begin(), zidian2.end());
-			dict_new = zidian1.size();									// 合并后的大小
-			ofstream zd("c:\\new.txt");
+			CString path;
+			this->file1.GetWindowText(path);
+			wofstream zd(path.GetString());
 			for (auto& i : zidian1)
 			{
-				zd << i + "\n";
+				zd << i << L"\n";
 			}
 			zd.close();
-			CString str;
-			str.Format(_T("%d"), dict_new);				// 将int转PTRSTR类型
-			LPCTSTR pStr = LPCTSTR(str);
-			count_new.SetWindowTextW(pStr);		//设置新字典计数大小
 		}
-		else
-		{
-			zidian2.insert(zidian2.end(), zidian1.begin(), zidian1.end());
-			dict_new = zidian2.size();
-			ofstream zd("c:\\new.txt");
-			for (auto& i : zidian2)
-			{
-				zd << i + "\n";
-			}
-			zd.close();
-			CString str;
-			str.Format(_T("%d"), dict_new);
-			LPCTSTR pStr = LPCTSTR(str);
-			count_new.SetWindowTextW(pStr);
-		}
-	}
+		// 线程内
+		::PostMessage(this->GetSafeHwnd(), WM_UPDATE_COUNT_NEW, static_cast<WPARAM>(dict_new), 0);
+
+		}).detach();
 }
 
-// 筛选按钮，过滤出8位以上的密码
+// 合并按钮
+void CDictManageDlg::OnBnClickedMerge()
+{
+	thread([this]() {
+		dict_new = 0;
+		if (zidian1.empty() && zidian2.empty())
+		{
+			// 保证两个编辑框里面字典都不会空，才会进行合并字典。
+		}
+		else {
+			if (zidian1.size() >= zidian2.size())
+			{
+				zidian1.insert(zidian1.end(), zidian2.begin(), zidian2.end());
+				dict_new = zidian1.size();									// 合并后的大小
+				CString path1;
+				file1.GetWindowTextW(path1);
+				wofstream zd(path1.GetString());
+				for (auto& i : zidian1)
+				{
+					zd << i + L"\n";
+				}
+				zd.close();
+				CString pathDelete;
+				file2.GetWindowTextW(pathDelete);
+				std::error_code ec;
+				std::filesystem::remove(std::filesystem::path(pathDelete.GetString()),ec);
+			}
+			else{
+				zidian2.insert(zidian2.end(), zidian1.begin(), zidian1.end());
+				dict_new = zidian2.size();
+				CString path2;
+				file1.GetWindowTextW(path2);
+				wofstream zd(path2.GetString());
+				for (auto& i : zidian2)
+				{
+					zd << i + L"\n";
+				}
+				CString pathDelete1;
+				std::error_code ec;
+				std::filesystem::remove(std::filesystem::path(path2.GetString()), ec);
+				zd.close();
+			}
+		}	
+		// 线程内
+		::PostMessage(this->GetSafeHwnd(), WM_UPDATE_COUNT_NEW, static_cast<WPARAM>(dict_new), 0);
+	}).detach();
+}
+
+// 筛选按钮
 void CDictManageDlg::OnBnClickedFilter()
 {
 	dict_new = 0;
 	string buf = {};
-	OnBnClickedCalculate1();
 	ofstream fs_o("c:\\new.txt");
-	
+
 	for (auto& i : zidian1)
 	{
 		if (!(i.length() < 8))
 		{
-			fs_o << i + "\n";
+			//fs_o << i + "\n";
 			++dict_new;
 		}
 	}
 	fs_o.close();
 	CString str;
-	str.Format(_T("%d"), dict_new);				// 将int转PTRSTR类型
+	str.Format(_T("%zu"), static_cast<unsigned long long>(dict_new));				
 	LPCTSTR pStr = LPCTSTR(str);
 	count_new.SetWindowTextW(pStr);		//设置新字典计数大小
 
 }
+
+
+
+// ------------My1EditBrowseCtrl类---------------------------------------------------------------
+void My1EditBrowseCtrl::OnBrowse()
+{
+    CMFCEditBrowseCtrl::OnBrowse(); 
+    CDictManageDlg* pDlg = dynamic_cast<CDictManageDlg*>(GetParent());
+    UINT nID = GetDlgCtrlID();
+    if (pDlg != nullptr)
+    {
+        // 立即更新计数显示
+        CString path;
+        GetWindowText(path);
+        if (!path.IsEmpty())
+        {
+            calc(pDlg, nID, this);
+        }
+    }
+}
+
+// ------------My2EditBrowseCtrl类---------------------------------------------------------------
+void My2EditBrowseCtrl::OnBrowse()
+{
+	CMFCEditBrowseCtrl::OnBrowse(); // 控件的默认行为
+	CDictManageDlg* pDlg = dynamic_cast<CDictManageDlg*>(GetParent());
+	UINT nID = GetDlgCtrlID();
+	calc(pDlg, nID, this);
+}
+
+
+
+
+
+
+
+
