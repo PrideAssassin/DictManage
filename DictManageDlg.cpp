@@ -262,6 +262,8 @@ void CDictManageDlg::OnBnClickedMerge()
 {
 	thread([this]() {
 		dict_new = 0;
+		CString path1;
+		CString path2;
 		if (zidian1.empty() && zidian2.empty())
 		{
 			// 保证两个编辑框里面字典都不会空，才会进行合并字典。
@@ -270,13 +272,13 @@ void CDictManageDlg::OnBnClickedMerge()
 			if (zidian1.size() >= zidian2.size())
 			{
 				zidian1.insert(zidian1.end(), zidian2.begin(), zidian2.end());
-				dict_new = zidian1.size();									// 合并后的大小
-				CString path1;
+				dict_new = zidian1.size();									
+				
 				file1.GetWindowTextW(path1);
 				wofstream zd(path1.GetString());
 				for (auto& i : zidian1)
 				{
-					zd << i + L"\n";
+					zd << i << L"\n";
 				}
 				zd.close();
 				CString pathDelete;
@@ -287,17 +289,18 @@ void CDictManageDlg::OnBnClickedMerge()
 			else{
 				zidian2.insert(zidian2.end(), zidian1.begin(), zidian1.end());
 				dict_new = zidian2.size();
-				CString path2;
-				file1.GetWindowTextW(path2);
-				wofstream zd(path2.GetString());
+				
+				file1.GetWindowTextW(path1);
+				wofstream zd(path1.GetString());
 				for (auto& i : zidian2)
 				{
-					zd << i + L"\n";
+					zd << i << L"\n";
 				}
-				CString pathDelete1;
-				std::error_code ec;
-				std::filesystem::remove(std::filesystem::path(path2.GetString()), ec);
 				zd.close();
+				CString pathDelete;
+				file2.GetWindowTextW(pathDelete);
+				std::error_code ec;
+				std::filesystem::remove(std::filesystem::path(pathDelete.GetString()), ec);
 			}
 		}	
 		// 线程内
