@@ -27,8 +27,8 @@ bool dict_ready = false;
 using namespace std;
 size_t dict_count1 = 0;		// 用来保存字典1大小
 size_t dict_count2 = 0;		// 用来保存字典2大小
-size_t dict_new = 0;			// 用来保存新字典大小
-vector<wstring> zidian1, zidian2;		//创建string对象，存放字典文件
+size_t dict_count3 = 0;			// 用来保存新字典大小
+vector<string> dict1, dict2;		//创建string对象，存放字典文件
 
 #ifdef _DEBUG
 #define new DEBUG_NEW
@@ -41,30 +41,44 @@ vector<wstring> zidian1, zidian2;		//创建string对象，存放字典文件
 
 // -----------------自定义功能函数-----------------------------
 // 计数处理
-static void calc(CDictManageDlg* pDlg, UINT nID, CMFCEditBrowseCtrl* pCtrl) {
-	if (pDlg != nullptr && pCtrl != nullptr)
-	{
-		int button_i = (nID == IDC_FILE1) ? 1 : (nID == IDC_FILE2 ? 2 : 0);
-		if (button_i == 0) return;
-
-		CString path;
-		pCtrl->GetWindowTextW(path);
-
-		// 捕获 button_i 和 path
-		thread([pDlg, button_i, path]() {
-			vector<wstring> data;
-			wifstream fs(path.GetString());
-			fs.imbue(locale(""));
-			wstring wbuf;
-			while (fs >> wbuf) {
-				data.push_back(wbuf);
+static void calc(CMFCEditBrowseCtrl* pCtrl) {
+	try{ 
+		pCtrl->CMFCEditBrowseCtrl::OnBrowse();		
+		thread([pCtrl]() {
+			UINT nID = pCtrl->GetDlgCtrlID();	// 获取按钮ID
+			CString path;
+			pCtrl->GetWindowTextW(path);		// 获取文件路径
+			ifstream fs(path);				// 打开文件
+			string buf;
+			if (nID==IDC_FILE1) {
+				dict1 = {};					// 清空原有字典内容
+			}
+			else
+			{
+				dict2 = {};					// 清空原有字典内容
+			}
+			while (fs >> buf) {
+				switch (nID) {
+					case IDC_FILE1:				
+						dict1.push_back(buf);		// 将文件内容读入vector容器
+						break;
+					case IDC_FILE2:
+						dict2.push_back(buf);
+						break;
+					default:
+						cerr << "未知的按钮ID" << endl;
+						break;
+				}
 			}
 			fs.close();
-			auto* result = new FileLoadResult{ button_i, move(data) };
-			::PostMessage(pDlg->GetSafeHwnd(), WM_FILE_LOAD_FINISHED, reinterpret_cast<WPARAM>(result), 0);
+			pCtrl->GetParent()->PostMessage(WM_FILE_LOAD_FINISHED, nID, 0);
 			}).detach();
 	}
+	catch (exception e) {
+		cout << e.what() << "加载文件错误！" << endl;
+	}
 }
+
 
 
 
@@ -191,31 +205,27 @@ HCURSOR CDictManageDlg::OnQueryDragIcon()
 	return static_cast<HCURSOR>(m_hIcon);
 }
 
-LRESULT CDictManageDlg::OnFileLoadFinished(WPARAM wParam, LPARAM lParam)
+LRESULT CDictManageDlg::OnFileLoadFinished(WPARAM wParam,LPARAM lParam)
 {
-	FileLoadResult* result = reinterpret_cast<FileLoadResult*>(wParam);
-    if (result)
-    {
-        // 更新对应的计数显示
-        if (result->button_i == 1)
-        {
-			zidian1 = move(result->data);
-			dict_count1 = static_cast<long>(zidian1.size());
+	switch (wParam) {
+		case IDC_FILE1: {
+			dict_count1 = dict1.size();
 			CString str;
 			str.Format(_T("%zu"), static_cast<unsigned long long>(dict_count1));
 			count1.SetWindowTextW(str);
-        }
-        else if (result->button_i == 2)
-        {
-			zidian2 = move(result->data);
-			dict_count2 = static_cast<unsigned long long>(zidian2.size());
+			break;
+		}
+		case IDC_FILE2: {
+			dict_count2 = dict2.size();
 			CString str;
 			str.Format(_T("%zu"), static_cast<unsigned long long>(dict_count2));
 			count2.SetWindowTextW(str);
-        }
-		delete result; // 释放内存
-    }
-    return 0;
+			break;
+		}
+		default: {
+			return 0; 
+		}
+	}
 }
 
 LRESULT CDictManageDlg::OnUpdateCountNew(WPARAM wParam, LPARAM lParam)
@@ -233,27 +243,26 @@ LRESULT CDictManageDlg::OnUpdateCountNew(WPARAM wParam, LPARAM lParam)
 void CDictManageDlg::OnBnClickedDeWeight()
 {
 	thread([this]() {
-		sort(zidian1.begin(), zidian1.end());
-		auto uend = unique(zidian1.begin(), zidian1.end());		//去重函数(不会改变容器大小)
-		zidian1.erase(uend, zidian1.end());						 // 删除掉容器重复多余部分
-		
-		dict_new = zidian1.size();									// 去重后的大小
+		sort(dict1.begin(), dict1.end());
+		auto uend = unique(dict1.begin(), dict1.end());		//去重函数(不会改变容器大小)
+		dict1.erase(uend, dict1.end());						 // 删除掉容器重复多余部分
+		dict_count3 = dict1.size();									// 去重后的大小
 	
 		// 如果原文件大小与去重后大小没有变化(没有重复的元素)，就不执行任何操作,
-		if (dict_new < dict_count1)
+		if (dict_count3 < dict_count1)
 		{
 			CString path;
 			this->file1.GetWindowText(path);
-			wofstream zd(path.GetString());
-			for (auto& i : zidian1)
+			ofstream zd(path);
+			for (auto& i : dict1)
 			{
-				zd << i << L"\n";
+				zd << i << "\n";
 			}
 			zd.close();
 		}
+		// count1.SetWindowTextW(L"0");
 		// 线程内
-		::PostMessage(this->GetSafeHwnd(), WM_UPDATE_COUNT_NEW, static_cast<WPARAM>(dict_new), 0);
-
+		::PostMessage(this->GetSafeHwnd(), WM_UPDATE_COUNT_NEW, (WPARAM)dict_count3, 0);
 		}).detach();
 }
 
@@ -261,24 +270,24 @@ void CDictManageDlg::OnBnClickedDeWeight()
 void CDictManageDlg::OnBnClickedMerge()
 {
 	thread([this]() {
-		dict_new = 0;
+		dict_count3 = 0;
 		CString path1;
 		CString path2;
-		if (zidian1.empty() && zidian2.empty())
+		if (dict1.empty() && dict2.empty())
 		{
 			// 保证两个编辑框里面字典都不会空，才会进行合并字典。
 		}
 		else {
-			if (zidian1.size() >= zidian2.size())
+			if (dict1.size() >= dict2.size())
 			{
-				zidian1.insert(zidian1.end(), zidian2.begin(), zidian2.end());
-				dict_new = zidian1.size();									
+				dict1.insert(dict1.end(), dict2.begin(), dict2.end());
+				dict_count3 = dict1.size();
 				
 				file1.GetWindowTextW(path1);
-				wofstream zd(path1.GetString());
-				for (auto& i : zidian1)
+				ofstream zd(path1);
+				for (auto& i : dict1)
 				{
-					zd << i << L"\n";
+					zd << i << "\n" << endl;
 				}
 				zd.close();
 				CString pathDelete;
@@ -287,14 +296,14 @@ void CDictManageDlg::OnBnClickedMerge()
 				std::filesystem::remove(std::filesystem::path(pathDelete.GetString()),ec);
 			}
 			else{
-				zidian2.insert(zidian2.end(), zidian1.begin(), zidian1.end());
-				dict_new = zidian2.size();
+				dict2.insert(dict2.end(), dict1.begin(), dict1.end());
+				dict_count3 = dict2.size();
 				
 				file1.GetWindowTextW(path1);
-				wofstream zd(path1.GetString());
-				for (auto& i : zidian2)
+				ofstream zd(path1);
+				for (auto& i : dict2)
 				{
-					zd << i << L"\n";
+					zd << i << "\n" << endl;
 				}
 				zd.close();
 				CString pathDelete;
@@ -304,28 +313,28 @@ void CDictManageDlg::OnBnClickedMerge()
 			}
 		}	
 		// 线程内
-		::PostMessage(this->GetSafeHwnd(), WM_UPDATE_COUNT_NEW, static_cast<WPARAM>(dict_new), 0);
+		::PostMessage(this->GetSafeHwnd(), WM_UPDATE_COUNT_NEW, (WPARAM)dict_count3, 0);
 	}).detach();
 }
 
 // 筛选按钮
 void CDictManageDlg::OnBnClickedFilter()
 {
-	dict_new = 0;
+	dict_count3 = 0;
 	string buf = {};
 	ofstream fs_o("c:\\new.txt");
 
-	for (auto& i : zidian1)
+	for (auto& i : dict1)
 	{
 		if (!(i.length() < 8))
 		{
 			//fs_o << i + "\n";
-			++dict_new;
+			++dict_count3;
 		}
 	}
 	fs_o.close();
 	CString str;
-	str.Format(_T("%zu"), static_cast<unsigned long long>(dict_new));				
+	str.Format(_T("%zu"), static_cast<unsigned long long>(dict_count3));
 	LPCTSTR pStr = LPCTSTR(str);
 	count_new.SetWindowTextW(pStr);		//设置新字典计数大小
 
@@ -333,33 +342,14 @@ void CDictManageDlg::OnBnClickedFilter()
 
 
 
-// ------------My1EditBrowseCtrl类---------------------------------------------------------------
-void My1EditBrowseCtrl::OnBrowse()
-{
-    CMFCEditBrowseCtrl::OnBrowse(); 
-    CDictManageDlg* pDlg = dynamic_cast<CDictManageDlg*>(GetParent());
-    UINT nID = GetDlgCtrlID();
-    if (pDlg != nullptr)
-    {
-        // 立即更新计数显示
-        CString path;
-        GetWindowText(path);
-        if (!path.IsEmpty())
-        {
-            calc(pDlg, nID, this);
-        }
-    }
+// ------------MyEditBrowseCtr类---------------------------------------------------------------
+void My1EditBrowseCtrl::OnBrowse() { 
+	calc(this); 
 }
 
-// ------------My2EditBrowseCtrl类---------------------------------------------------------------
-void My2EditBrowseCtrl::OnBrowse()
-{
-	CMFCEditBrowseCtrl::OnBrowse(); // 控件的默认行为
-	CDictManageDlg* pDlg = dynamic_cast<CDictManageDlg*>(GetParent());
-	UINT nID = GetDlgCtrlID();
-	calc(pDlg, nID, this);
+void My2EditBrowseCtrl::OnBrowse() {
+	calc(this); 
 }
-
 
 
 

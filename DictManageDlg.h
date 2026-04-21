@@ -5,16 +5,13 @@
 #define WM_FILE_LOAD_FINISHED (WM_USER + 100)
 
 class My1EditBrowseCtrl : public CMFCEditBrowseCtrl {
-
-protected:
-	virtual void OnBrowse();
-
+	protected:	
+		virtual void OnBrowse();
 };
 
 class My2EditBrowseCtrl : public CMFCEditBrowseCtrl {
-
-protected:
-	virtual void OnBrowse();
+	protected:
+		virtual void OnBrowse();
 };
 
 struct FileLoadResult {
